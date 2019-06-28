@@ -179,6 +179,12 @@ std::vector<float> TFAttrs::get<std::vector<float>>(const string& key) const {
 }
 
 template <>
+std::vector<NameAttrList> TFAttrs::get<std::vector<NameAttrList>>(const string& key) const {
+  auto attr = this->at(key)->list().func();
+  return std::vector<NameAttrList>(attr.begin(), attr.end());
+}
+
+template <>
 nvinfer1::DataType TFAttrs::get<nvinfer1::DataType>(const string& key) const {
   nvinfer1::DataType trt_dtype(nvinfer1::DataType::kFLOAT);
   TF_CHECK_OK(TfDataTypeToTrt(this->at(key)->type(), &trt_dtype));
