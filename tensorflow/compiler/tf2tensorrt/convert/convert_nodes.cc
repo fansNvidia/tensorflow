@@ -52,6 +52,9 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/util/strided_slice_op.h"
 
+#include "tensorflow/core/framework/attr_value.pb_text.h"
+#include "tensorflow/core/framework/attr_value_util.h"
+
 #if GOOGLE_CUDA
 #if GOOGLE_TENSORRT
 #include "third_party/tensorrt/NvInfer.h"
@@ -4866,6 +4869,68 @@ Status ConvertAddN(OpConverterParams* params) {
   return Status::OK();
 }
 
+Status ConvertCustomTRTPlugin(OpConverterParams *params) {
+  const auto& inputs = params->inputs;
+  const auto& node_def = params->node_def;
+  LOG(INFO) << "Get into converter of trt plugin op";
+  TFAttrs attrs(node_def);
+  //string plugin_name= attrs.get<string>("trt_plugin_name");
+  if (!attrs.count("trt_plugin_name")) {
+    LOG(INFO) << "*********Cannot find plugin name attribute************";
+    return errors::InvalidArgument(
+          "Plugin Name need to be specified");
+  }
+  LOG(INFO) << "Successfully find the plugin in plugin register";
+  std::string plugin_name= attrs.get<std::string>("trt_plugin_name");
+  auto creator =
+      getPluginRegistry()->getPluginCreator(plugin_name.c_str(), "1", "");
+  TFTRT_RETURN_ERROR_IF_NULLPTR(creator, node_def.name());
+
+  /*
+    Here only check the registration of plugin. (Prototype version)
+    TODO: Need to do more validation about the plugin
+  */
+  if (params->validation_only) return Status::OK();
+  std::vector<nvinfer1::PluginField> pluginFields;
+  if (attrs.count("trt_plugin_attrs")) {
+    auto pluginAttrList = attrs.get<std::vector<NameAttrList>>("trt_plugin_attrs");
+    for (auto& attr: pluginAttrList) {
+      LOG(INFO) << "Get the attribute value of plugin " << plugin_name << " " <<attr.name();
+      for (auto& pair : attr.attr()) {
+        LOG(INFO) << "First field of value " << pair.first << "Type of second " << pair.second.type();
+        if (pair.first == "int") {
+          int32 attrValue = static_cast<int32>(pair.second.i());
+          pluginFields.push_back(nvinfer1::PluginField{plugin_name.c_str(), &attrValue,
+                            nvinfer1::PluginFieldType::kINT32, 1});
+        } else if(pair.first == "float") {
+          float attrValue = pair.second.f();
+          pluginFields.push_back(nvinfer1::PluginField{plugin_name.c_str(), &attrValue,
+                            nvinfer1::PluginFieldType::kFLOAT32, 1});
+        }
+      }
+    }
+  }
+  nvinfer1::ITensor* input_tensor = inputs.at(0).tensor();
+  nvinfer1::PluginFieldCollection fc{static_cast<int>(pluginFields.size()), pluginFields.data()};
+
+  TrtUniquePtrType<nvinfer1::IPluginV2> plugin(
+      creator->createPlugin(node_def.name().c_str(), &fc));
+  TFTRT_RETURN_ERROR_IF_NULLPTR(plugin, node_def.name());
+
+  std::vector<nvinfer1::ITensor*> plugin_inputs;
+  plugin_inputs.push_back(input_tensor);
+
+  // Add plugin to network
+  nvinfer1::IPluginV2Layer* layer = params->converter->network()->addPluginV2(
+      &plugin_inputs[0], static_cast<int>(plugin_inputs.size()), *plugin);
+  TFTRT_RETURN_ERROR_IF_NULLPTR(layer, node_def.name());
+
+  nvinfer1::ITensor* output_tensor = layer->getOutput(0);
+  params->outputs->push_back(TRT_TensorOrWeights(output_tensor));
+
+  return Status::OK();
+}
+
 static void RegisterValidatableOpConverters(
     std::unordered_map<string, OpConverter>* registration) {
   (*registration)["BatchMatMul"] = ConvertBatchMatMul;
@@ -4908,6 +4973,10 @@ static void RegisterValidatableOpConverters(
   (*registration)["TopKV2"] = ConvertTopK;
   (*registration)["Transpose"] = ConvertTranspose;
   (*registration)["Unpack"] = ConvertUnpack;
+
+  //Add plugin op converter at registration here
+  (*registration)["TrtPluginOp"] = ConvertCustomTRTPlugin;
+
 
   for (auto quantization_op_type :
        {"QuantizeAndDequantizeV2", "QuantizeAndDequantizeV3",
