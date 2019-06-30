@@ -9,10 +9,12 @@ namespace tensorflow {
 // No real kernel implementation will be provided for this op
 // 
 REGISTER_OP("TrtPluginOp")
-    .Input("test_in: float")
-    .Output("test_out: float")
     .Attr("trt_plugin_name: string")
     .Attr("trt_plugin_attrs: list(func)");              // List of attributes
+    .Attr("InT: list({int8,float16,float32,int32})")    // Input list to plugin node. The order of input in important
+    .Attr("outT: list({int8,float16,float32,int32})")   // Output list of plugin node. The order of output need to be specified
+    .Input("in_tensor: InT")                            // Input to plugin node
+    .Output("out_tensor: outT")                         // Output of plugin node
 
 
 // Kernel for op
