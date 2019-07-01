@@ -14,7 +14,7 @@ REGISTER_OP("TrtPluginOp")
     .Attr("InT: list({int8,float16,float32,int32})")    // Input list to plugin node. The order of input in important
     .Attr("outT: list({int8,float16,float32,int32})")   // Output list of plugin node. The order of output need to be specified
     .Input("in_tensor: InT")                            // Input to plugin node
-    .Output("out_tensor: outT");                         // Output of plugin node
+    .Output("out_tensor: OutT");                         // Output of plugin node
 
 
 // Kernel for op
