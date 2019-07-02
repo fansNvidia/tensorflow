@@ -4896,7 +4896,7 @@ Status ConvertCustomTRTPlugin(OpConverterParams *params) {
     Here only check the registration of plugin. (Prototype version)
     TODO: Need to do more validation about the plugin
   */
-  if (params->validation_only) return Status::OK();
+if (params->validation_only) return Status::OK();
   std::vector<nvinfer1::PluginField> pluginFields;
   if (attrs.count("trt_plugin_attrs")) {
     auto pluginAttrList = attrs.get<std::vector<NameAttrList>>("trt_plugin_attrs");
@@ -4912,6 +4912,15 @@ Status ConvertCustomTRTPlugin(OpConverterParams *params) {
           float attrValue = pair.second.f();
           pluginFields.push_back(nvinfer1::PluginField{plugin_name.c_str(), &attrValue,
                             nvinfer1::PluginFieldType::kFLOAT32, 1});
+        } else if(pair.first == "int_list") {
+          auto attr = pair.second.list().i();
+          std::vector<int64> intList(attr.begin(), attr.end());
+          int32 attrList[intList.size()];
+          for (size_t idx = 0; idx < intList.size(); idx++) {
+            attrList[idx] = static_cast<int32>(intList[idx]);
+          }
+          pluginFields.push_back(nvinfer1::PluginField{plugin_name.c_str(), attrList,
+                            nvinfer1::PluginFieldType::kINT32, static_cast<int32>(intList.size())});
         }
       }
     }
@@ -4923,18 +4932,30 @@ Status ConvertCustomTRTPlugin(OpConverterParams *params) {
       creator->createPlugin(node_def.name().c_str(), &fc));
   TFTRT_RETURN_ERROR_IF_NULLPTR(plugin, node_def.name());
 
+  // Forward the inputs in same order
+  // TODO: Handle inputs when test the plugin node with network 
   std::vector<nvinfer1::ITensor*> plugin_inputs;
-  plugin_inputs.push_back(input_tensor);
+  for (auto &input : inputs) {
+    if (input.is_tensor()) {
+      plugin_inputs.push_back(input.tensor());
+    }
+  }
 
   // Add plugin to network
   nvinfer1::IPluginV2Layer* layer = params->converter->network()->addPluginV2(
       &plugin_inputs[0], static_cast<int>(plugin_inputs.size()), *plugin);
   TFTRT_RETURN_ERROR_IF_NULLPTR(layer, node_def.name());
 
-  nvinfer1::ITensor* output_tensor = layer->getOutput(0);
-  params->outputs->push_back(TRT_TensorOrWeights(output_tensor));
+  int numberOutputs = layer->getNbOutputs();
+
+  //TODO: This step will forward output in exactly same order as layer provide
+  for (int outIdx = 0; outIdx < numberOutputs; outIdx++) {
+    nvinfer1::ITensor* output_tensor = layer->getOutput(outIdx);
+    params->outputs->push_back(TRT_TensorOrWeights(output_tensor));
+  }
 
   return Status::OK();
+
 }
 
 static void RegisterValidatableOpConverters(
