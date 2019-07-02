@@ -4882,49 +4882,52 @@ Status ConvertCustomTRTPlugin(OpConverterParams *params) {
   TFAttrs attrs(node_def);
   //string plugin_name= attrs.get<string>("trt_plugin_name");
   if (!attrs.count("trt_plugin_name")) {
-    LOG(INFO) << "*********Cannot find plugin name attribute************";
     return errors::InvalidArgument(
           "Plugin Name need to be specified");
   }
-  LOG(INFO) << "Successfully find the plugin in plugin register";
+  
   std::string plugin_name= attrs.get<std::string>("trt_plugin_name");
+
+  // TODO: For official plugin, need to return here. However, it's better to 
+  // query custom plugin before convert graph
+  if (params->validation_only) return Status::OK();
+
   auto creator =
       getPluginRegistry()->getPluginCreator(plugin_name.c_str(), "1", "");
   TFTRT_RETURN_ERROR_IF_NULLPTR(creator, node_def.name());
-
+  LOG(INFO) << "Successfully find the plugin in plugin register";
   /*
     Here only check the registration of plugin. (Prototype version)
     TODO: Need to do more validation about the plugin
   */
-if (params->validation_only) return Status::OK();
-  std::vector<nvinfer1::PluginField> pluginFields;
-  if (attrs.count("trt_plugin_attrs")) {
-    auto pluginAttrList = attrs.get<std::vector<NameAttrList>>("trt_plugin_attrs");
-    for (auto& attr: pluginAttrList) {
-      LOG(INFO) << "Get the attribute value of plugin " << plugin_name << " " <<attr.name();
-      for (auto& pair : attr.attr()) {
-        LOG(INFO) << "First field of value " << pair.first << "Type of second " << pair.second.type();
-        if (pair.first == "int") {
-          int32 attrValue = static_cast<int32>(pair.second.i());
-          pluginFields.push_back(nvinfer1::PluginField{plugin_name.c_str(), &attrValue,
-                            nvinfer1::PluginFieldType::kINT32, 1});
-        } else if(pair.first == "float") {
-          float attrValue = pair.second.f();
-          pluginFields.push_back(nvinfer1::PluginField{plugin_name.c_str(), &attrValue,
-                            nvinfer1::PluginFieldType::kFLOAT32, 1});
-        } else if(pair.first == "int_list") {
-          auto attr = pair.second.list().i();
-          std::vector<int64> intList(attr.begin(), attr.end());
-          int32 attrList[intList.size()];
-          for (size_t idx = 0; idx < intList.size(); idx++) {
-            attrList[idx] = static_cast<int32>(intList[idx]);
-          }
-          pluginFields.push_back(nvinfer1::PluginField{plugin_name.c_str(), attrList,
-                            nvinfer1::PluginFieldType::kINT32, static_cast<int32>(intList.size())});
+std::vector<nvinfer1::PluginField> pluginFields;
+if (attrs.count("trt_plugin_attrs")) {
+  auto pluginAttrList = attrs.get<std::vector<NameAttrList>>("trt_plugin_attrs");
+  for (auto& attr: pluginAttrList) {
+    LOG(INFO) << "Get the attribute value of plugin " << plugin_name << " " <<attr.name();
+    for (auto& pair : attr.attr()) {
+      LOG(INFO) << "First field of value " << pair.first << "Type of second " << pair.second.type();
+      if (pair.first == "int") {
+        int32 attrValue = static_cast<int32>(pair.second.i());
+        pluginFields.push_back(nvinfer1::PluginField{plugin_name.c_str(), &attrValue,
+                          nvinfer1::PluginFieldType::kINT32, 1});
+      } else if(pair.first == "float") {
+        float attrValue = pair.second.f();
+        pluginFields.push_back(nvinfer1::PluginField{plugin_name.c_str(), &attrValue,
+                          nvinfer1::PluginFieldType::kFLOAT32, 1});
+      } else if(pair.first == "int_list") {
+        auto attr = pair.second.list().i();
+        std::vector<int64> intList(attr.begin(), attr.end());
+        int32 attrList[intList.size()];
+        for (size_t idx = 0; idx < intList.size(); idx++) {
+          attrList[idx] = static_cast<int32>(intList[idx]);
         }
+        pluginFields.push_back(nvinfer1::PluginField{plugin_name.c_str(), attrList,
+                          nvinfer1::PluginFieldType::kINT32, static_cast<int32>(intList.size())});
       }
     }
   }
+}
   nvinfer1::ITensor* input_tensor = inputs.at(0).tensor();
   nvinfer1::PluginFieldCollection fc{static_cast<int>(pluginFields.size()), pluginFields.data()};
 
